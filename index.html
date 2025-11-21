@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 
@@ -368,8 +369,8 @@ function montarAccordion(){
       <div class="accordion-header">
         Treino ${t}
         <div style="display:flex; gap:0.5rem;">
-            <button class=\"toggle-button\">+</button>
-            <button class=\"reset-treino\" data-treino=\"${t}\">🔄</button>
+            <button class="toggle-button">+</button>
+            <button class="reset-treino" data-treino="${t}">🔄</button>
         </div>
       </div>
 
@@ -462,8 +463,12 @@ function saveEdit(){
   const treino = currentEditTreino;
 
   if(newName !== currentEditExercise){
+    // garantir cargas existentes (cópia segura) caso exista
+    const existingLoads = exercisesData[currentEditExercise] && exercisesData[currentEditExercise].loads
+                          ? [...exercisesData[currentEditExercise].loads] : [];
+
     if(!exercisesData[newName])
-      exercisesData[newName] = { treinos:{}, loads: exercisesData[currentEditExercise].loads };
+      exercisesData[newName] = { treinos:{}, loads: existingLoads };
 
     exercisesData[newName].treinos[treino] =
       exercisesData[currentEditExercise].treinos[treino];
@@ -479,8 +484,8 @@ function saveEdit(){
 
   const ex = exercisesData[currentEditExercise].treinos[treino];
   ex.series = s;
-  ex.reps = r;
-  ex.rest = d;
+  ex.reps   = r;
+  ex.rest   = d;
 
   editModal.classList.remove("show");
 
@@ -488,14 +493,30 @@ function saveEdit(){
   saveToFirestore();
 }
 
+/* =========================================================
+   CORREÇÃO: identificação robusta do <li data-name> e
+   normalização segura de exercisesData[name].loads
+========================================================= */
 function handleAccordionClick(e){
   const btn = e.target;
 
-  const li = btn.closest("li");
+  // procura o li mais próximo com data-name subindo na árvore DOM
+  let li = btn.closest("li");
+  if(!li){
+    // se closest não encontrou (ou clique em nó interno que não tem li), subimos manualmente
+    let el = btn;
+    while(el && el !== accordion && !el.getAttribute?.('data-name')){
+      el = el.parentElement;
+    }
+    if(el && el.getAttribute && el.getAttribute('data-name')) li = el;
+  }
+
   const treinoDiv = btn.closest(".accordion-item");
   const treino = treinoDiv?.dataset.treino;
-  const name = li?.dataset.name;
 
+  const name = li ? li.getAttribute("data-name") : null;
+
+  /* Botão abrir/fechar do header do treino */
   if(btn.classList.contains("toggle-button")){
     const ul = treinoDiv.querySelector(".exercise-list");
     const hidden = ul.style.display === "none";
@@ -504,6 +525,7 @@ function handleAccordionClick(e){
     return;
   }
 
+  /* Reset do treino */
   if(btn.classList.contains("reset-treino")){
     if(!confirm(`Resetar Treino ${treino}?`)) return;
 
@@ -520,20 +542,29 @@ function handleAccordionClick(e){
     return;
   }
 
-  if(!li || !name || !treino) return;
+  // se não achou exercício, nada mais é executado
+  if (!li || !name || !treino) return;
+
+  // garante que exista registro de cargas para este exercício
+  if(!exercisesData[name]) exercisesData[name] = { treinos:{}, loads:[] };
+  if(!Array.isArray(exercisesData[name].loads)) exercisesData[name].loads = [];
 
   const exData = exercisesData[name].treinos[treino];
 
+  /* Marcar concluído */
   if(btn.classList.contains("done-btn")){
     li.classList.toggle("done");
     alertMsg("🏋️‍♂️ Exercício concluído. Lembre-se de adicionar suas cargas!");
     return;
   }
 
+  /* Adicionar carga */
   if(btn.classList.contains("add-load")){
     const carga = prompt("Carga (kg):");
     if(carga){
       const date = new Date().toLocaleDateString();
+      // garante array antes de unshift
+      if(!Array.isArray(exercisesData[name].loads)) exercisesData[name].loads = [];
       exercisesData[name].loads.unshift(`${carga} kg – ${date}`);
       exercisesData[name].loads = exercisesData[name].loads.slice(0,5);
       renderExercises();
@@ -542,19 +573,24 @@ function handleAccordionClick(e){
     return;
   }
 
+  /* Remover carga */
   if(btn.classList.contains("remove-load")){
-    if(exercisesData[name].loads) exercisesData[name].loads.shift();
+    if(Array.isArray(exercisesData[name].loads) && exercisesData[name].loads.length){
+      exercisesData[name].loads.shift();
+    }
     renderExercises();
     saveToFirestore();
     return;
   }
 
+  /* Editar carga */
   if(btn.classList.contains("edit-load")){
-    if(!exercisesData[name].loads.length){
+    if(!Array.isArray(exercisesData[name].loads) || !exercisesData[name].loads.length){
       alert("Nenhuma carga!");
       return;
     }
-    const atual = exercisesData[name].loads[0].split(" ")[0];
+    // pega apenas número atual (antes do "kg")
+    const atual = String(exercisesData[name].loads[0]).split(" ")[0];
     const nova = prompt("Editar carga:", atual);
     if(nova){
       const date = new Date().toLocaleDateString();
@@ -565,12 +601,14 @@ function handleAccordionClick(e){
     return;
   }
 
+  /* Abrir submenu */
   if(btn.classList.contains("edit-options")){
     const menu = li.querySelector(".edit-menu");
     menu.style.display = menu.style.display === "flex" ? "none" : "flex";
     return;
   }
 
+  /* Editar informações */
   if(btn.classList.contains("edit-all")){
     currentEditExercise = name;
     currentEditTreino = treino;
@@ -584,6 +622,7 @@ function handleAccordionClick(e){
     return;
   }
 
+  /* Deletar exercício */
   if(btn.classList.contains("delete-exercise")){
     if(!confirm(`Remover ${name} do Treino ${treino}?`)) return;
 
@@ -601,7 +640,7 @@ function handleAccordionClick(e){
 
 function renderExercises(){
   treinos.forEach(t => {
-    const ul = document.querySelector(`.accordion-item[data-treino=\"${t}\"] .exercise-list`);
+    const ul = document.querySelector(`.accordion-item[data-treino="${t}"] .exercise-list`);
     ul.innerHTML = "";
 
     const order = exerciseOrder[t] || [];
@@ -614,32 +653,33 @@ function renderExercises(){
 
       li.innerHTML = `
         <div>${name}</div>
-        <div class=\"exercise-info\">
+        <div class="exercise-info">
           Séries: ${ex.series} | Repetições: ${ex.reps} | Descanso: ${ex.rest}
         </div>
 
-        <ul class=\"loads-list\"></ul>
+        <ul class="loads-list"></ul>
 
-        <div class=\"exercise-buttons\">
-          <button class=\"add-load\">Adicionar Carga</button>
-          <button class=\"edit-options\">Editar</button>
-          <button class=\"remove-load\">Remover Carga</button>
-          <button class=\"delete-exercise\">Remover Exercício</button>
-          <button class=\"done-btn\">Concluído</button>
+        <div class="exercise-buttons">
+          <button class="add-load">Adicionar Carga</button>
+          <button class="edit-options">Editar</button>
+          <button class="remove-load">Remover Carga</button>
+          <button class="delete-exercise">Remover Exercício</button>
+          <button class="done-btn">Concluído</button>
         </div>
 
-        <div class=\"edit-menu\">
-          <button class=\"edit-load\">Editar Carga</button>
-          <button class=\"edit-all\">Editar Informações</button>
+        <div class="edit-menu">
+          <button class="edit-load">Editar Carga</button>
+          <button class="edit-all">Editar Informações</button>
         </div>
 
-        <textarea class=\"observation\" placeholder=\"Observações...\">${ex.observations || ""}</textarea>
+        <textarea class="observation" placeholder="Observações...">${ex.observations || ""}</textarea>
       `;
 
       ul.appendChild(li);
 
       const loadsUl = li.querySelector(".loads-list");
-      (exercisesData[name].loads || []).forEach(l => {
+      const loadsArray = Array.isArray(exercisesData[name].loads) ? exercisesData[name].loads : [];
+      loadsArray.forEach(l => {
         const liLoad = document.createElement("li");
         liLoad.textContent = l;
         loadsUl.appendChild(liLoad);
@@ -660,7 +700,7 @@ function enableDragDrop(){
   const isTouch = "ontouchstart" in window;
 
   treinos.forEach(t => {
-    const ul = document.querySelector(`.accordion-item[data-treino=\"${t}\"] .exercise-list`);
+    const ul = document.querySelector(`.accordion-item[data-treino="${t}"] .exercise-list`);
     if(!ul) return;
 
     new Sortable(ul, {
@@ -681,8 +721,8 @@ function atualizarListaSelecao(){
   const select = document.getElementById("exerciseSelect");
 
   select.innerHTML = `
-    <option value=\"\">Selecione...</option>
-    <option value=\"add\">+ Adicionar novo exercício</option>
+    <option value="">Selecione...</option>
+    <option value="add">+ Adicionar novo exercício</option>
   `;
 
   Object.keys(exercisesData).sort().forEach(name => {
@@ -719,6 +759,12 @@ async function loadFromFirestore(){
 
     treinos.forEach(t => {
       if(!exerciseOrder[t]) exerciseOrder[t] = [];
+    });
+
+    // Normaliza objetos para ter cargas como arrays mesmo quando ausentes
+    Object.keys(exercisesData).forEach(name => {
+      if(!Array.isArray(exercisesData[name].loads)) exercisesData[name].loads = [];
+      if(!exercisesData[name].treinos) exercisesData[name].treinos = {};
     });
 
     renderExercises();
