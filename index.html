@@ -208,7 +208,6 @@ button:hover{
   margin-top:1rem;
 }
 
-/* ---------- BOTÃO + / – ---------- */
 .toggle-button {
   width: 40px;
   height: 40px;
@@ -225,7 +224,6 @@ button:hover{
   cursor: pointer;
 }
 
-/* 🔥 REMOVER FUNDO AZUL AO CLICAR */
 .toggle-button:focus,
 .toggle-button:active,
 .toggle-button:hover,
@@ -334,6 +332,8 @@ const db = firebase.firestore();
 ===================== */
 let exercisesData = {};
 let exerciseOrder = {};
+let doneState = {};  // ← concluídos apenas durante a sessão
+
 const treinos = ['A','B','C','D','E','F'];
 
 const accordion = document.getElementById("accordion");
@@ -463,9 +463,8 @@ function saveEdit(){
   const treino = currentEditTreino;
 
   if(newName !== currentEditExercise){
-    // garantir cargas existentes (cópia segura) caso exista
-    const existingLoads = exercisesData[currentEditExercise] && exercisesData[currentEditExercise].loads
-                          ? [...exercisesData[currentEditExercise].loads] : [];
+    const existingLoads = exercisesData[currentEditExercise]?.loads
+      ? [...exercisesData[currentEditExercise].loads] : [];
 
     if(!exercisesData[newName])
       exercisesData[newName] = { treinos:{}, loads: existingLoads };
@@ -494,16 +493,13 @@ function saveEdit(){
 }
 
 /* =========================================================
-   CORREÇÃO: identificação robusta do <li data-name> e
-   normalização segura de exercisesData[name].loads
+   MANIPULAÇÃO DE CLIQUES – INCLUINDO "CONCLUÍDO" COM doneState
 ========================================================= */
 function handleAccordionClick(e){
   const btn = e.target;
 
-  // procura o li mais próximo com data-name subindo na árvore DOM
   let li = btn.closest("li");
   if(!li){
-    // se closest não encontrou (ou clique em nó interno que não tem li), subimos manualmente
     let el = btn;
     while(el && el !== accordion && !el.getAttribute?.('data-name')){
       el = el.parentElement;
@@ -516,7 +512,6 @@ function handleAccordionClick(e){
 
   const name = li ? li.getAttribute("data-name") : null;
 
-  /* Botão abrir/fechar do header do treino */
   if(btn.classList.contains("toggle-button")){
     const ul = treinoDiv.querySelector(".exercise-list");
     const hidden = ul.style.display === "none";
@@ -525,7 +520,6 @@ function handleAccordionClick(e){
     return;
   }
 
-  /* Reset do treino */
   if(btn.classList.contains("reset-treino")){
     if(!confirm(`Resetar Treino ${treino}?`)) return;
 
@@ -537,24 +531,31 @@ function handleAccordionClick(e){
     });
 
     exerciseOrder[treino] = [];
+
+    Object.keys(doneState)
+      .filter(k => k.startsWith(treino+"::"))
+      .forEach(k => delete doneState[k]);
+
     renderExercises();
     saveToFirestore();
     return;
   }
 
-  // se não achou exercício, nada mais é executado
   if (!li || !name || !treino) return;
 
-  // garante que exista registro de cargas para este exercício
   if(!exercisesData[name]) exercisesData[name] = { treinos:{}, loads:[] };
   if(!Array.isArray(exercisesData[name].loads)) exercisesData[name].loads = [];
 
   const exData = exercisesData[name].treinos[treino];
 
-  /* Marcar concluído */
+  /* Concluído */
   if(btn.classList.contains("done-btn")){
-    li.classList.toggle("done");
-    alertMsg("🏋️‍♂️ Exercício concluído. Lembre-se de adicionar suas cargas!");
+    const key = treino + "::" + name;
+
+    doneState[key] = !doneState[key];
+    li.classList.toggle("done", doneState[key]);
+
+    alertMsg("🏋️‍♂️ Exercício concluído!");
     return;
   }
 
@@ -563,10 +564,11 @@ function handleAccordionClick(e){
     const carga = prompt("Carga (kg):");
     if(carga){
       const date = new Date().toLocaleDateString();
-      // garante array antes de unshift
+
       if(!Array.isArray(exercisesData[name].loads)) exercisesData[name].loads = [];
       exercisesData[name].loads.unshift(`${carga} kg – ${date}`);
       exercisesData[name].loads = exercisesData[name].loads.slice(0,5);
+
       renderExercises();
       saveToFirestore();
     }
@@ -589,7 +591,7 @@ function handleAccordionClick(e){
       alert("Nenhuma carga!");
       return;
     }
-    // pega apenas número atual (antes do "kg")
+
     const atual = String(exercisesData[name].loads[0]).split(" ")[0];
     const nova = prompt("Editar carga:", atual);
     if(nova){
@@ -601,14 +603,12 @@ function handleAccordionClick(e){
     return;
   }
 
-  /* Abrir submenu */
   if(btn.classList.contains("edit-options")){
     const menu = li.querySelector(".edit-menu");
     menu.style.display = menu.style.display === "flex" ? "none" : "flex";
     return;
   }
 
-  /* Editar informações */
   if(btn.classList.contains("edit-all")){
     currentEditExercise = name;
     currentEditTreino = treino;
@@ -622,7 +622,6 @@ function handleAccordionClick(e){
     return;
   }
 
-  /* Deletar exercício */
   if(btn.classList.contains("delete-exercise")){
     if(!confirm(`Remover ${name} do Treino ${treino}?`)) return;
 
@@ -632,6 +631,10 @@ function handleAccordionClick(e){
 
     if(Object.keys(exercisesData[name].treinos).length === 0)
       delete exercisesData[name];
+
+    Object.keys(doneState)
+      .filter(k => k.endsWith("::"+name))
+      .forEach(k => delete doneState[k]);
 
     renderExercises();
     saveToFirestore();
@@ -650,6 +653,9 @@ function renderExercises(){
 
       const li = document.createElement("li");
       li.dataset.name = name;
+
+      const key = t + "::" + name;
+      if (doneState[key]) li.classList.add("done");
 
       li.innerHTML = `
         <div>${name}</div>
@@ -761,7 +767,6 @@ async function loadFromFirestore(){
       if(!exerciseOrder[t]) exerciseOrder[t] = [];
     });
 
-    // Normaliza objetos para ter cargas como arrays mesmo quando ausentes
     Object.keys(exercisesData).forEach(name => {
       if(!Array.isArray(exercisesData[name].loads)) exercisesData[name].loads = [];
       if(!exercisesData[name].treinos) exercisesData[name].treinos = {};
