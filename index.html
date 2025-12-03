@@ -30,6 +30,32 @@ body{
 h1{text-align:center;font-size:2rem;margin-bottom:0.5rem;}
 p.slogan{text-align:center;font-size:1rem;color:#555;margin-bottom:1.5rem;}
 
+/* estilo do campo de busca (igual aos inputs existentes) */
+#searchInput{
+  width:100%;
+  padding:0.6rem;
+  border-radius:8px;
+  border:1px solid #ccc;
+  margin-top:0.3rem;
+  background:#f9f9f9;
+  font-family:'Inter',sans-serif;
+  font-size:0.95rem;
+}
+
+#searchResults{
+  list-style:none;
+  margin-top:0.5rem;
+  padding-left:0;
+}
+
+.search-card{
+  background:#fff;
+  padding:0.6rem;
+  border-radius:8px;
+  margin-bottom:0.5rem;
+  box-shadow:0 2px 6px rgba(0,0,0,0.06);
+}
+
 section{max-width:900px;margin:1rem auto;}
 
 input, select, button, textarea{
@@ -241,6 +267,7 @@ button:hover{
 <h1>🏋️‍♂️ Carga Up – Evolua a Cada Treino</h1>
 <p class="slogan">Registre. Evolua. Supere-se.</p>
 
+<!-- campo de busca adicionado (posição 2: abaixo do addExerciseSection) -->
 <section id="addExerciseSection">
   <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:0.5rem;">
     <button type="button" id="toggleAddExercise" class="toggle-button">+</button>
@@ -280,6 +307,12 @@ button:hover{
   </div>
 </section>
 
+<!-- campo de busca exibido logo abaixo da área de adicionar exercício -->
+<section style="max-width:900px;margin:0 auto 1rem auto;">
+  <input id="searchInput" placeholder="Buscar exercício (nome, treino, carga, obs...)" />
+  <ul id="searchResults"></ul>
+</section>
+
 <section id="accordion"></section>
 
 <div class="alert" id="alertMsg"></div>
@@ -307,6 +340,7 @@ button:hover{
   </div>
 </div>
 
+<!-- scripts compatíveis (mesma abordagem que você usava) -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
@@ -407,6 +441,58 @@ function configurarInterface(){
   document.getElementById("saveEdit").addEventListener("click", saveEdit);
 
   accordion.addEventListener("click", handleAccordionClick);
+
+  // salvar observações ao digitar (delegation)
+  document.addEventListener("input", function(e){
+    if(e.target && e.target.classList && e.target.classList.contains("observation")){
+      const li = e.target.closest("li");
+      const name = li?.getAttribute("data-name");
+      const treinoEl = li?.closest(".accordion-item");
+      const treino = treinoEl?.dataset.treino;
+      if(name && treino){
+        if(!exercisesData[name]) exercisesData[name] = { treinos:{}, loads:[] };
+        if(!exercisesData[name].treinos[treino]) exercisesData[name].treinos[treino] = { series:"", reps:"", rest:"", observations:"" };
+        exercisesData[name].treinos[treino].observations = e.target.value;
+        saveToFirestore();
+      }
+    }
+  });
+
+  // busca
+  document.getElementById("searchInput").addEventListener("input", function(){
+    const text = this.value.toLowerCase();
+    const results = document.getElementById("searchResults");
+    results.innerHTML = "";
+
+    if(text.trim() === "") return;
+
+    Object.keys(exercisesData).forEach(name => {
+      const exData = exercisesData[name];
+
+      // percorre treinos onde o exercício existe
+      Object.keys(exData.treinos || {}).forEach(t => {
+        const ex = exData.treinos[t];
+        // cargas são armazenadas globalmente em exData.loads (como no seu código original)
+        const cargas = Array.isArray(exData.loads) ? exData.loads.join(" • ") : "";
+
+        const fullText = `${name} ${t} ${ex.series} ${ex.reps} ${ex.rest} ${ex.observations || ""} ${cargas}`.toLowerCase();
+
+        if(fullText.includes(text)){
+          const li = document.createElement("li");
+          li.className = "search-card";
+
+          li.innerHTML = `
+            <strong>${name}</strong> — Treino <strong>${t}</strong><br>
+            Séries: ${ex.series || "-"} • Reps: ${ex.reps || "-"} • Descanso: ${ex.rest || "-"}<br>
+            <em>Cargas:</em> ${cargas || "Nenhuma"}<br>
+            <em>Observações:</em> ${ex.observations || "-"}
+          `;
+
+          results.appendChild(li);
+        }
+      });
+    });
+  });
 }
 
 function addExercise(){
@@ -432,7 +518,7 @@ function addExercise(){
     exerciseOrder[treino] = [];
 
   exercisesData[name].treinos[treino] = {
-    series, reps, rest, observations:""
+    series, reps, rest, observations: exercisesData[name].treinos?.[treino]?.observations || ""
   };
 
   if(!exerciseOrder[treino].includes(name))
@@ -523,11 +609,14 @@ function handleAccordionClick(e){
   if(btn.classList.contains("reset-treino")){
     if(!confirm(`Resetar Treino ${treino}?`)) return;
 
+    // Alteração: preservar observações & cargas — limpar apenas séries/reps/rest/done
     Object.keys(exercisesData).forEach(n => {
-      if(exercisesData[n].treinos[treino])
+      if(exercisesData[n].treinos[treino]){
+        const existingObs = exercisesData[n].treinos[treino].observations || exercisesData[n].treinos[treino].observacoes || "";
         exercisesData[n].treinos[treino] = {
-          series:"", reps:"", rest:"", observations:""
+          series:"", reps:"", rest:"", observations: existingObs
         };
+      }
     });
 
     exerciseOrder[treino] = [];
